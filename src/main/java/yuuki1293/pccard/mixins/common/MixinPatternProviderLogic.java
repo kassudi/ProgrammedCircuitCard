@@ -35,6 +35,66 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
     @Shadow
     public abstract void updatePatterns();
 
+    @Shadow
+    @Final
+    private appeng.api.networking.IManagedGridNode mainNode;
+
+    @Shadow
+    @Final
+    private java.util.List<IPatternDetails> patterns;
+
+    @Shadow
+    @Final
+    private java.util.List<appeng.api.stacks.GenericStack> sendList;
+
+    // ---- temporary diagnostics: which check in pushPattern refuses the push ----
+    @Inject(method = "pushPattern", at = @At("HEAD"))
+    private void pCCard$diagHead(CallbackInfoReturnable<Boolean> cir,
+        @Local(ordinal = 0, argsOnly = true) IPatternDetails patternDetails) {
+        if (!isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get()) || !PatternProviderLogicImpl.diagReady("head"))
+            return;
+        org.slf4j.LoggerFactory.getLogger("PCC-DIAG")
+            .info(
+                "[PCC-DIAG] pushPattern provider={} sendListEmpty={} nodeActive={} patternKnown={} circuit={} inputs={}",
+                this.host.getBlockEntity()
+                    .getBlockPos(),
+                this.sendList.isEmpty(),
+                this.mainNode.isActive(),
+                this.patterns.contains(patternDetails),
+                PatternProviderLogicImpl.getCircuitNumber(patternDetails)
+                    .orElse(-1),
+                PatternProviderLogicImpl.describeInputs(patternDetails));
+    }
+
+    @Inject(method = "pushPattern", at = @At("RETURN"))
+    private void pCCard$diagReturn(CallbackInfoReturnable<Boolean> cir) {
+        if (!isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get())) return;
+        if (!cir.getReturnValue() && PatternProviderLogicImpl.diagReady("refused")) {
+            org.slf4j.LoggerFactory.getLogger("PCC-DIAG")
+                .info(
+                    "[PCC-DIAG] pushPattern REFUSED provider={}",
+                    this.host.getBlockEntity()
+                        .getBlockPos());
+        }
+    }
+
+    @Inject(method = "adapterAcceptsAll", at = @At("HEAD"), require = 0)
+    private void pCCard$diagAccepts(appeng.helpers.patternprovider.PatternProviderTarget target,
+        appeng.api.stacks.KeyCounter[] inputHolder, CallbackInfoReturnable<Boolean> cir) {
+        if (!isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get()) || !PatternProviderLogicImpl.diagReady("accepts"))
+            return;
+        var log = org.slf4j.LoggerFactory.getLogger("PCC-DIAG");
+        for (var list : inputHolder) {
+            for (var in : list) {
+                log.info(
+                    "[PCC-DIAG] simulate insert {} x{} -> accepted {}",
+                    in.getKey(),
+                    in.getLongValue(),
+                    target.insert(in.getKey(), in.getLongValue(), appeng.api.config.Actionable.SIMULATE));
+            }
+        }
+    }
+
     @ModifyArg(
         method = "updatePatterns",
         at = @At(

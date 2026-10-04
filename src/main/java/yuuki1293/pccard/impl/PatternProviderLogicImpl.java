@@ -48,6 +48,29 @@ public class PatternProviderLogicImpl {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    private static final java.util.Map<String, Long> DIAG_LAST = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Temporary diagnostics: true at most once per second per key so crafting spam does not flood the log. */
+    public static String describeInputs(IPatternDetails patternDetails) {
+        var sb = new StringBuilder("[");
+        for (var input : patternDetails.getInputs()) {
+            sb.append(input.getPossibleInputs()[0].what())
+                .append(" x")
+                .append(input.getMultiplier())
+                .append("; ");
+        }
+        return sb.append("]")
+            .toString();
+    }
+
+    public static boolean diagReady(String key) {
+        var now = System.currentTimeMillis();
+        var last = DIAG_LAST.get(key);
+        if (last != null && now - last < 1000L) return false;
+        DIAG_LAST.put(key, now);
+        return true;
+    }
+
     public static ItemStack updatePatterns(ItemStack stack) {
         var newStack = stack.copy();
         var inputs = TagUtils.getInputsFromPattern(newStack);
@@ -105,6 +128,14 @@ public class PatternProviderLogicImpl {
 
                 for (var blockPos : blockPoses) {
                     var gtMachine = SimpleTieredMachine.getMachine(level, blockPos);
+                    LOGGER.info(
+                        "[PCC-DIAG] setPCNumber target={} machine={} hasCircuitSlot={} number={}",
+                        blockPos,
+                        gtMachine == null ? "none(not a GT machine)"
+                            : gtMachine.getClass()
+                                .getName(),
+                        gtMachine instanceof IHasCircuitSlot,
+                        patternDetailsW.pCCard$getNumber());
                     if (gtMachine == null) continue; // filter gtMachine
 
                     if (gtMachine instanceof IHasCircuitSlot machine) {
@@ -188,6 +219,14 @@ public class PatternProviderLogicImpl {
         if (allLeafNodes.isEmpty()) {
             allLeafNodes.add(rootPosDir.getA());
         }
+
+        LOGGER.info(
+            "[PCC-DIAG] getSendPos provider={} direction={} root={} rootSide={} leaves={}",
+            be.getBlockPos(),
+            direction,
+            rootPosDir.getA(),
+            rootPosDir.getB(),
+            allLeafNodes);
 
         return allLeafNodes;
     }
