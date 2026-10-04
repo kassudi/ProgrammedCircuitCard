@@ -28,9 +28,9 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew build
-          mkdir -p /tmp/cmp/src
+          mkdir -p /tmp/cmp
           ls -l build/libs
-          cp build/libs/*.jar /tmp/cmp/src.jar
+          cp "build/libs/Programmed Circuit Card-1.20.1-1.4.2.jar" /tmp/cmp/src.jar
 
       - name: Download published jar from Modrinth
         run: |
