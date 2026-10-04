@@ -81,8 +81,9 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
     @Inject(method = "adapterAcceptsAll", at = @At("HEAD"), require = 0)
     private void pCCard$diagAccepts(appeng.helpers.patternprovider.PatternProviderTarget target,
         appeng.api.stacks.KeyCounter[] inputHolder, CallbackInfoReturnable<Boolean> cir) {
-        if (!isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get()) || !PatternProviderLogicImpl.diagReady("accepts"))
-            return;
+        if (
+            !isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get()) || !PatternProviderLogicImpl.diagReady("accepts")
+        ) return;
         var log = org.slf4j.LoggerFactory.getLogger("PCC-DIAG");
         for (var list : inputHolder) {
             for (var in : list) {
