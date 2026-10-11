@@ -22,9 +22,11 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 import org.slf4j.Logger;
 
+import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.SimpleTieredMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IHasCircuitSlot;
+import com.gregtechceu.gtceu.api.machine.trait.NotifiableFluidTank;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.common.data.GTItems;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
@@ -37,7 +39,9 @@ import appeng.api.implementations.blockentities.ICraftingMachine;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.security.IActionHost;
 import appeng.api.parts.IPartHost;
+import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.AEKey;
 import appeng.parts.storagebus.StorageBusPart;
 import yuuki1293.pccard.ConfigCommon;
 import yuuki1293.pccard.TagUtils;
@@ -47,29 +51,6 @@ import yuuki1293.pccard.wrapper.IPatternP2PTunnelLogicMixin;
 public class PatternProviderLogicImpl {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-
-    private static final java.util.Map<String, Long> DIAG_LAST = new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** Temporary diagnostics: true at most once per second per key so crafting spam does not flood the log. */
-    public static String describeInputs(IPatternDetails patternDetails) {
-        var sb = new StringBuilder("[");
-        for (var input : patternDetails.getInputs()) {
-            sb.append(input.getPossibleInputs()[0].what())
-                .append(" x")
-                .append(input.getMultiplier())
-                .append("; ");
-        }
-        return sb.append("]")
-            .toString();
-    }
-
-    public static boolean diagReady(String key) {
-        var now = System.currentTimeMillis();
-        var last = DIAG_LAST.get(key);
-        if (last != null && now - last < 1000L) return false;
-        DIAG_LAST.put(key, now);
-        return true;
-    }
 
     public static ItemStack updatePatterns(ItemStack stack) {
         var newStack = stack.copy();
@@ -95,6 +76,61 @@ public class PatternProviderLogicImpl {
         if (definitionTag != null && definitionTag.contains(NBT_CIRCUIT)) {
             inputs.add(AEItemKey.of(IntCircuitBehaviour.stack(definitionTag.getInt(NBT_CIRCUIT))));
         }
+    }
+
+    /**
+     * Blocking mode for subnets. AE2 only asks the block in front of the provider whether it holds any pattern input.
+     * For an ME Interface that is a small buffer which is flushed into the network within a tick, so blocking never
+     * sees the machines behind the Storage Buses. This asks those machines instead.
+     *
+     * @param be        Pattern Provider
+     * @param direction Item push direction
+     * @param inputs    inputs of all patterns of the provider
+     * @return {@code true} if a machine reached through the subnet still holds one of the inputs
+     */
+    public static boolean subnetHoldsPatternInput(BlockEntity be, Direction direction, Set<AEKey> inputs) {
+        try {
+            var level = be.getLevel();
+            if (level == null || inputs.isEmpty()) return false;
+
+            // The block directly in front of the provider is already checked by AE2.
+            var adjacent = be.getBlockPos()
+                .relative(direction);
+            for (var pos : getSendPos(be, direction)) {
+                if (pos.equals(adjacent)) continue;
+
+                var machine = MetaMachine.getMachine(level, pos);
+                if (machine != null && machineHoldsInput(machine, inputs)) return true;
+            }
+        } catch (Exception e) {
+            LOGGER.error("Failed to check the subnet for blocking", e);
+        }
+        return false;
+    }
+
+    private static boolean machineHoldsInput(MetaMachine machine, Set<AEKey> inputs) {
+        var circuitInventory = machine instanceof IHasCircuitSlot hasCircuit ? hasCircuit.getCircuitInventory() : null;
+
+        for (var trait : machine.getTraits()) {
+            if (trait instanceof NotifiableItemStackHandler items) {
+                if (items == circuitInventory || !items.getHandlerIO()
+                    .support(IO.IN)) continue;
+
+                for (var slot = 0; slot < items.getSlots(); slot++) {
+                    var stack = items.getStackInSlot(slot);
+                    if (!stack.isEmpty() && inputs.contains(AEItemKey.of(stack))) return true;
+                }
+            } else if (trait instanceof NotifiableFluidTank tank) {
+                if (!tank.getHandlerIO()
+                    .support(IO.IN)) continue;
+
+                for (var index = 0; index < tank.getTanks(); index++) {
+                    var fluid = tank.getFluidInTank(index);
+                    if (!fluid.isEmpty() && inputs.contains(AEFluidKey.of(fluid))) return true;
+                }
+            }
+        }
+        return false;
     }
 
     public static boolean isProgrammedCircuit(appeng.api.stacks.AEKey key) {
@@ -128,14 +164,6 @@ public class PatternProviderLogicImpl {
 
                 for (var blockPos : blockPoses) {
                     var gtMachine = SimpleTieredMachine.getMachine(level, blockPos);
-                    LOGGER.info(
-                        "[PCC-DIAG] setPCNumber target={} machine={} hasCircuitSlot={} number={}",
-                        blockPos,
-                        gtMachine == null ? "none(not a GT machine)"
-                            : gtMachine.getClass()
-                                .getName(),
-                        gtMachine instanceof IHasCircuitSlot,
-                        patternDetailsW.pCCard$getNumber());
                     if (gtMachine == null) continue; // filter gtMachine
 
                     if (gtMachine instanceof IHasCircuitSlot machine) {
@@ -219,14 +247,6 @@ public class PatternProviderLogicImpl {
         if (allLeafNodes.isEmpty()) {
             allLeafNodes.add(rootPosDir.getA());
         }
-
-        LOGGER.info(
-            "[PCC-DIAG] getSendPos provider={} direction={} root={} rootSide={} leaves={}",
-            be.getBlockPos(),
-            direction,
-            rootPosDir.getA(),
-            rootPosDir.getB(),
-            allLeafNodes);
 
         return allLeafNodes;
     }

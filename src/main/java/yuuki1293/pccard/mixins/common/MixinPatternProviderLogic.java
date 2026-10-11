@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.injection.*;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.sugar.Local;
 
 import appeng.api.crafting.IPatternDetails;
@@ -20,6 +21,7 @@ import appeng.api.stacks.AEKey;
 import appeng.api.upgrades.IUpgradeableObject;
 import appeng.helpers.patternprovider.PatternProviderLogic;
 import appeng.helpers.patternprovider.PatternProviderLogicHost;
+import yuuki1293.pccard.ConfigCommon;
 import yuuki1293.pccard.PCCard;
 import yuuki1293.pccard.impl.PatternProviderLogicImpl;
 
@@ -33,68 +35,11 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
     private PatternProviderLogicHost host;
 
     @Shadow
+    @Final
+    private Set<AEKey> patternInputs;
+
+    @Shadow
     public abstract void updatePatterns();
-
-    @Shadow
-    @Final
-    private appeng.api.networking.IManagedGridNode mainNode;
-
-    @Shadow
-    @Final
-    private java.util.List<IPatternDetails> patterns;
-
-    @Shadow
-    @Final
-    private java.util.List<appeng.api.stacks.GenericStack> sendList;
-
-    // ---- temporary diagnostics: which check in pushPattern refuses the push ----
-    @Inject(method = "pushPattern", at = @At("HEAD"))
-    private void pCCard$diagHead(CallbackInfoReturnable<Boolean> cir,
-        @Local(ordinal = 0, argsOnly = true) IPatternDetails patternDetails) {
-        if (!isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get()) || !PatternProviderLogicImpl.diagReady("head"))
-            return;
-        org.slf4j.LoggerFactory.getLogger("PCC-DIAG")
-            .info(
-                "[PCC-DIAG] pushPattern provider={} sendListEmpty={} nodeActive={} patternKnown={} circuit={} inputs={}",
-                this.host.getBlockEntity()
-                    .getBlockPos(),
-                this.sendList.isEmpty(),
-                this.mainNode.isActive(),
-                this.patterns.contains(patternDetails),
-                PatternProviderLogicImpl.getCircuitNumber(patternDetails)
-                    .orElse(-1),
-                PatternProviderLogicImpl.describeInputs(patternDetails));
-    }
-
-    @Inject(method = "pushPattern", at = @At("RETURN"))
-    private void pCCard$diagReturn(CallbackInfoReturnable<Boolean> cir) {
-        if (!isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get())) return;
-        if (!cir.getReturnValue() && PatternProviderLogicImpl.diagReady("refused")) {
-            org.slf4j.LoggerFactory.getLogger("PCC-DIAG")
-                .info(
-                    "[PCC-DIAG] pushPattern REFUSED provider={}",
-                    this.host.getBlockEntity()
-                        .getBlockPos());
-        }
-    }
-
-    @Inject(method = "adapterAcceptsAll", at = @At("HEAD"), require = 0)
-    private void pCCard$diagAccepts(appeng.helpers.patternprovider.PatternProviderTarget target,
-        appeng.api.stacks.KeyCounter[] inputHolder, CallbackInfoReturnable<Boolean> cir) {
-        if (
-            !isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get()) || !PatternProviderLogicImpl.diagReady("accepts")
-        ) return;
-        var log = org.slf4j.LoggerFactory.getLogger("PCC-DIAG");
-        for (var list : inputHolder) {
-            for (var in : list) {
-                log.info(
-                    "[PCC-DIAG] simulate insert {} x{} -> accepted {}",
-                    in.getKey(),
-                    in.getLongValue(),
-                    target.insert(in.getKey(), in.getLongValue(), appeng.api.config.Actionable.SIMULATE));
-            }
-        }
-    }
 
     @ModifyArg(
         method = "updatePatterns",
@@ -117,6 +62,27 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
         var result = new HashSet<>(patternInputs);
         PatternProviderLogicImpl.addCircuitToPatternInputs(patternDetails, result);
         return result;
+    }
+
+    /**
+     * Blocking mode only sees the block in front of the provider. For a subnet also look at the machines behind its
+     * Storage Buses, so a different recipe is not pushed while the previous one is still in the machine.
+     */
+    @ModifyExpressionValue(
+        method = "pushPattern",
+        at = @At(
+            value = "INVOKE",
+            target = "Lappeng/helpers/patternprovider/PatternProviderTarget;containsPatternInput(Ljava/util/Set;)Z"),
+        require = 0)
+    private boolean blockWhileSubnetIsBusy(boolean blocked, @Local(ordinal = 0) Direction direction) {
+        if (blocked || !ConfigCommon.isSubnetBlocking() || !isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get())) {
+            return blocked;
+        }
+
+        return PatternProviderLogicImpl.subnetHoldsPatternInput(
+            this.host.getBlockEntity(),
+            direction,
+            this.patternInputs);
     }
 
     @Inject(

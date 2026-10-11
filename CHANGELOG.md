@@ -2,6 +2,9 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
+### Fixed
+ - Pattern Provider blocking mode did not work with subnets. It now also checks the machines behind the Storage Buses,
+   so another recipe is not pushed while the previous one is still in the machine. Can be disabled with `subnet_blocking` in the common config.
 
 ## [1.4.2]
 ### Fixed
