@@ -113,16 +113,20 @@ public class PatternProviderLogicImpl {
 
         for (var trait : machine.getTraits()) {
             if (trait instanceof NotifiableItemStackHandler items) {
-                if (items == circuitInventory || !items.getHandlerIO()
-                    .support(IO.IN)) continue;
+                if (
+                    items == circuitInventory || !items.getHandlerIO()
+                        .support(IO.IN)
+                ) continue;
 
                 for (var slot = 0; slot < items.getSlots(); slot++) {
                     var stack = items.getStackInSlot(slot);
                     if (!stack.isEmpty() && inputs.contains(AEItemKey.of(stack))) return true;
                 }
             } else if (trait instanceof NotifiableFluidTank tank) {
-                if (!tank.getHandlerIO()
-                    .support(IO.IN)) continue;
+                if (
+                    !tank.getHandlerIO()
+                        .support(IO.IN)
+                ) continue;
 
                 for (var index = 0; index < tank.getTanks(); index++) {
                     var fluid = tank.getFluidInTank(index);

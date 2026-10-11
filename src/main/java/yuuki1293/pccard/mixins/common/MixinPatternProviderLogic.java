@@ -79,10 +79,8 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
             return blocked;
         }
 
-        return PatternProviderLogicImpl.subnetHoldsPatternInput(
-            this.host.getBlockEntity(),
-            direction,
-            this.patternInputs);
+        return PatternProviderLogicImpl
+            .subnetHoldsPatternInput(this.host.getBlockEntity(), direction, this.patternInputs);
     }
 
     @Inject(
