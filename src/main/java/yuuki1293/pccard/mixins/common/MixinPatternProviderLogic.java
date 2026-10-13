@@ -75,8 +75,9 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
             value = "INVOKE",
             target = "Lappeng/helpers/patternprovider/PatternProviderTarget;containsPatternInput(Ljava/util/Set;)Z"),
         require = 0)
-    private boolean blockWhileSubnetIsBusy(boolean blocked, @Local(ordinal = 0, argsOnly = true) IPatternDetails patternDetails,
-        @Local(ordinal = 0) Direction direction, @Local PatternProviderTarget adapter) {
+    private boolean blockWhileSubnetIsBusy(boolean blocked,
+        @Local(ordinal = 0, argsOnly = true) IPatternDetails patternDetails, @Local(ordinal = 0) Direction direction,
+        @Local PatternProviderTarget adapter) {
         if (!ConfigCommon.isSubnetBlocking() || !isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get())) {
             return blocked;
         }
