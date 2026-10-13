@@ -21,6 +21,7 @@ import appeng.api.stacks.AEKey;
 import appeng.api.upgrades.IUpgradeableObject;
 import appeng.helpers.patternprovider.PatternProviderLogic;
 import appeng.helpers.patternprovider.PatternProviderLogicHost;
+import appeng.helpers.patternprovider.PatternProviderTarget;
 import yuuki1293.pccard.ConfigCommon;
 import yuuki1293.pccard.PCCard;
 import yuuki1293.pccard.impl.PatternProviderLogicImpl;
@@ -74,13 +75,19 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
             value = "INVOKE",
             target = "Lappeng/helpers/patternprovider/PatternProviderTarget;containsPatternInput(Ljava/util/Set;)Z"),
         require = 0)
-    private boolean blockWhileSubnetIsBusy(boolean blocked, @Local(ordinal = 0) Direction direction) {
-        if (blocked || !ConfigCommon.isSubnetBlocking() || !isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get())) {
+    private boolean blockWhileSubnetIsBusy(boolean blocked, @Local(ordinal = 0, argsOnly = true) IPatternDetails patternDetails,
+        @Local(ordinal = 0) Direction direction, @Local PatternProviderTarget adapter) {
+        if (!ConfigCommon.isSubnetBlocking() || !isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get())) {
             return blocked;
         }
 
-        return PatternProviderLogicImpl
-            .subnetHoldsPatternInput(this.host.getBlockEntity(), direction, this.patternInputs);
+        return PatternProviderLogicImpl.blockWhileSubnetIsBusy(
+            blocked,
+            this.host.getBlockEntity(),
+            direction,
+            patternDetails,
+            this.patternInputs,
+            adapter);
     }
 
     @Inject(

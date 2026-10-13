@@ -11,6 +11,8 @@ public class ConfigCommon {
 
     private static final ForgeConfigSpec.IntValue SEARCH_DEPTH;
     private static final ForgeConfigSpec.BooleanValue SUBNET_BLOCKING;
+    private static final ForgeConfigSpec.BooleanValue SMART_SUBNET_BLOCKING;
+    private static final ForgeConfigSpec.IntValue SMART_BLOCKING_MAX_BATCHES;
 
     static {
         builder.comment("*****************************************");
@@ -27,6 +29,17 @@ public class ConfigCommon {
             .comment("Only applies to Pattern Providers with a Programmed Circuit Card installed.")
             .define("subnet_blocking", true);
 
+        SMART_SUBNET_BLOCKING = builder
+            .comment("Smart blocking for subnets (requires subnet_blocking).")
+            .comment("Instead of blocking while the machine holds any input, only block while it holds inputs of a")
+            .comment("different pattern or a different programmed circuit. The same pattern can be pushed again,")
+            .comment("so several batches can sit in the machine and a parallel hatch can use them.")
+            .define("smart_subnet_blocking", false);
+
+        SMART_BLOCKING_MAX_BATCHES = builder
+            .comment("Smart blocking: stop pushing the same pattern once the machine already holds this many batches.")
+            .defineInRange("smart_blocking_max_batches", 8, 1, 1024);
+
         spec = builder.build();
     }
 
@@ -36,5 +49,13 @@ public class ConfigCommon {
 
     public static boolean isSubnetBlocking() {
         return SUBNET_BLOCKING.get();
+    }
+
+    public static boolean isSmartBlocking() {
+        return SMART_SUBNET_BLOCKING.get();
+    }
+
+    public static int getSmartBlockingMaxBatches() {
+        return SMART_BLOCKING_MAX_BATCHES.get();
     }
 }

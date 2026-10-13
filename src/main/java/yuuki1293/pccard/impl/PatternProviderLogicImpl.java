@@ -42,6 +42,7 @@ import appeng.api.parts.IPartHost;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
+import appeng.helpers.patternprovider.PatternProviderTarget;
 import appeng.parts.storagebus.StorageBusPart;
 import yuuki1293.pccard.ConfigCommon;
 import yuuki1293.pccard.TagUtils;
@@ -83,29 +84,87 @@ public class PatternProviderLogicImpl {
      * For an ME Interface that is a small buffer which is flushed into the network within a tick, so blocking never
      * sees the machines behind the Storage Buses. This asks those machines instead.
      *
+     * @param blocked   AE2's own answer
      * @param be        Pattern Provider
      * @param direction Item push direction
-     * @param inputs    inputs of all patterns of the provider
-     * @return {@code true} if a machine reached through the subnet still holds one of the inputs
+     * @param pattern   pattern which is about to be pushed
+     * @param allInputs inputs of all patterns of the provider
+     * @param adapter   target in front of the provider
+     * @return {@code true} if the push has to wait
      */
-    public static boolean subnetHoldsPatternInput(BlockEntity be, Direction direction, Set<AEKey> inputs) {
+    public static boolean blockWhileSubnetIsBusy(boolean blocked, BlockEntity be, Direction direction,
+        IPatternDetails pattern, Set<AEKey> allInputs, PatternProviderTarget adapter) {
         try {
-            var level = be.getLevel();
-            if (level == null || inputs.isEmpty()) return false;
+            var machines = getSubnetMachines(be, direction);
+            if (machines.isEmpty()) return blocked; // not a subnet, leave it to AE2
 
-            // The block directly in front of the provider is already checked by AE2.
-            var adjacent = be.getBlockPos()
-                .relative(direction);
-            for (var pos : getSendPos(be, direction)) {
-                if (pos.equals(adjacent)) continue;
-
-                var machine = MetaMachine.getMachine(level, pos);
-                if (machine != null && machineHoldsInput(machine, inputs)) return true;
+            if (!ConfigCommon.isSmartBlocking()) {
+                if (blocked) return true;
+                for (var machine : machines) {
+                    if (machineHoldsInput(machine, allInputs)) return true;
+                }
+                return false;
             }
+
+            // Smart blocking: the same pattern may be pushed again, anything else has to wait.
+            var foreign = new HashSet<>(allInputs);
+            foreign.removeAll(getPatternInputs(pattern));
+
+            // Another pattern's inputs may still be in the interface's buffer, on their way to the machine.
+            if (!foreign.isEmpty() && adapter.containsPatternInput(foreign)) return true;
+
+            var circuit = getCircuitNumber(pattern);
+            var maxBatches = ConfigCommon.getSmartBlockingMaxBatches();
+            for (var machine : machines) {
+                if (!foreign.isEmpty() && machineHoldsInput(machine, foreign)) return true;
+
+                if (circuit.isPresent() && machine instanceof IHasCircuitSlot hasCircuit) {
+                    var circuitStack = hasCircuit.getCircuitInventory()
+                        .getStackInSlot(0);
+                    var machineCircuit = circuitStack.isEmpty() ? 0
+                        : IntCircuitBehaviour.getCircuitConfiguration(circuitStack);
+                    if (machineCircuit != circuit.get() && machineHoldsInput(machine, allInputs)) return true;
+                }
+
+                if (getHeldBatches(machine, pattern) >= maxBatches) return true;
+            }
+            return false;
         } catch (Exception e) {
             LOGGER.error("Failed to check the subnet for blocking", e);
+            return blocked;
         }
-        return false;
+    }
+
+    /**
+     * @return machines reached through the subnet behind the provider. The block in front of the provider is not
+     *         included, AE2 checks that one itself.
+     */
+    private static List<MetaMachine> getSubnetMachines(BlockEntity be, Direction direction) {
+        var level = be.getLevel();
+        if (level == null) return List.of();
+
+        var adjacent = be.getBlockPos()
+            .relative(direction);
+        var machines = new ArrayList<MetaMachine>();
+        for (var pos : getSendPos(be, direction)) {
+            if (pos.equals(adjacent)) continue;
+
+            var machine = MetaMachine.getMachine(level, pos);
+            if (machine != null) machines.add(machine);
+        }
+        return machines;
+    }
+
+    private static Set<AEKey> getPatternInputs(IPatternDetails pattern) {
+        var inputs = new HashSet<AEKey>();
+        for (var input : pattern.getInputs()) {
+            for (var possible : input.getPossibleInputs()) {
+                inputs.add(
+                    possible.what()
+                        .dropSecondary());
+            }
+        }
+        return inputs;
     }
 
     private static boolean machineHoldsInput(MetaMachine machine, Set<AEKey> inputs) {
@@ -135,6 +194,51 @@ public class PatternProviderLogicImpl {
             }
         }
         return false;
+    }
+
+    /**
+     * @return how many batches of the pattern the machine already holds, judged by its most plentiful input
+     */
+    private static long getHeldBatches(MetaMachine machine, IPatternDetails pattern) {
+        long batches = 0;
+        for (var input : pattern.getInputs()) {
+            var needed = input.getMultiplier();
+            if (needed <= 0) continue;
+
+            var key = input.getPossibleInputs()[0].what();
+            batches = Math.max(batches, getHeldAmount(machine, key) / needed);
+        }
+        return batches;
+    }
+
+    private static long getHeldAmount(MetaMachine machine, AEKey key) {
+        var circuitInventory = machine instanceof IHasCircuitSlot hasCircuit ? hasCircuit.getCircuitInventory() : null;
+
+        long amount = 0;
+        for (var trait : machine.getTraits()) {
+            if (trait instanceof NotifiableItemStackHandler items) {
+                if (
+                    items == circuitInventory || !items.getHandlerIO()
+                        .support(IO.IN)
+                ) continue;
+
+                for (var slot = 0; slot < items.getSlots(); slot++) {
+                    var stack = items.getStackInSlot(slot);
+                    if (!stack.isEmpty() && key.equals(AEItemKey.of(stack))) amount += stack.getCount();
+                }
+            } else if (trait instanceof NotifiableFluidTank tank) {
+                if (
+                    !tank.getHandlerIO()
+                        .support(IO.IN)
+                ) continue;
+
+                for (var index = 0; index < tank.getTanks(); index++) {
+                    var fluid = tank.getFluidInTank(index);
+                    if (!fluid.isEmpty() && key.equals(AEFluidKey.of(fluid))) amount += fluid.getAmount();
+                }
+            }
+        }
+        return amount;
     }
 
     public static boolean isProgrammedCircuit(appeng.api.stacks.AEKey key) {
