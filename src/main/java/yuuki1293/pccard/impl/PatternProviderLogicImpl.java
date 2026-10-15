@@ -137,8 +137,10 @@ public class PatternProviderLogicImpl {
         var now = System.currentTimeMillis();
         var last = DEBUG_LAST.get(key);
         // The crafting CPU retries every tick, only log when something changed or now and then.
-        if (last != null && last.getA()
-            .equals(text) && now - last.getB() < 5000L) return;
+        if (
+            last != null && last.getA()
+                .equals(text) && now - last.getB() < 5000L
+        ) return;
         DEBUG_LAST.put(key, new Tuple<>(text, now));
 
         var output = pattern.getPrimaryOutput();
@@ -151,8 +153,8 @@ public class PatternProviderLogicImpl {
             text);
     }
 
-    private static boolean decideBlocking(boolean blocked, BlockEntity be, Direction direction,
-        IPatternDetails pattern, Set<AEKey> allInputs, PatternProviderTarget adapter, StringBuilder reason) {
+    private static boolean decideBlocking(boolean blocked, BlockEntity be, Direction direction, IPatternDetails pattern,
+        Set<AEKey> allInputs, PatternProviderTarget adapter, StringBuilder reason) {
         var machines = getSubnetMachines(be, direction);
         reason.append("machines=[");
         for (var machine : machines) {
@@ -160,8 +162,9 @@ public class PatternProviderLogicImpl {
                 machine.getClass()
                     .getSimpleName())
                 .append('@')
-                .append(machine.getPos()
-                    .toShortString())
+                .append(
+                    machine.getPos()
+                        .toShortString())
                 .append(' ');
         }
         reason.append("] ");
@@ -178,8 +181,9 @@ public class PatternProviderLogicImpl {
             for (var machine : machines) {
                 var held = findHeldInput(machine, allInputs);
                 if (held != null) {
-                    reason.append(machine.getPos()
-                        .toShortString())
+                    reason.append(
+                        machine.getPos()
+                            .toShortString())
                         .append(" holds ")
                         .append(held);
                     return true;
