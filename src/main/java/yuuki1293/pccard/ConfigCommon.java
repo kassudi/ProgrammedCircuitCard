@@ -13,6 +13,7 @@ public class ConfigCommon {
     private static final ForgeConfigSpec.BooleanValue SUBNET_BLOCKING;
     private static final ForgeConfigSpec.BooleanValue SMART_SUBNET_BLOCKING;
     private static final ForgeConfigSpec.IntValue SMART_BLOCKING_MAX_BATCHES;
+    private static final ForgeConfigSpec.BooleanValue BLOCKING_DEBUG;
 
     static {
         builder.comment("*****************************************");
@@ -39,6 +40,10 @@ public class ConfigCommon {
             .comment("Smart blocking: stop pushing the same pattern once the machine already holds this many batches.")
             .defineInRange("smart_blocking_max_batches", 8, 1, 1024);
 
+        BLOCKING_DEBUG = builder
+            .comment("Log every subnet blocking decision as [PCC-BLOCK] lines in the log. For troubleshooting.")
+            .define("blocking_debug", false);
+
         spec = builder.build();
     }
 
@@ -52,6 +57,10 @@ public class ConfigCommon {
 
     public static boolean isSmartBlocking() {
         return SMART_SUBNET_BLOCKING.get();
+    }
+
+    public static boolean isBlockingDebug() {
+        return BLOCKING_DEBUG.get();
     }
 
     public static int getSmartBlockingMaxBatches() {

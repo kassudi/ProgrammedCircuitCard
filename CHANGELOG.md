@@ -3,6 +3,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 ### Added
+ - `blocking_debug` common config option. Logs every subnet blocking decision as `[PCC-BLOCK]` lines.
  - Smart blocking for subnets (`smart_subnet_blocking`, off by default). The same pattern can be pushed again while the machine
    holds inputs of it, only a different pattern or a different programmed circuit blocks. Up to `smart_blocking_max_batches`
    batches are pushed, so a parallel hatch can use them.

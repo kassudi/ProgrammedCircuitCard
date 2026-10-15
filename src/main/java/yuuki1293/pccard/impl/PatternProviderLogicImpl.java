@@ -6,8 +6,10 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 import javax.annotation.Nullable;
@@ -94,45 +96,150 @@ public class PatternProviderLogicImpl {
      */
     public static boolean blockWhileSubnetIsBusy(boolean blocked, BlockEntity be, Direction direction,
         IPatternDetails pattern, Set<AEKey> allInputs, PatternProviderTarget adapter) {
+        var reason = new StringBuilder();
+        var result = blocked;
         try {
-            var machines = getSubnetMachines(be, direction);
-            if (machines.isEmpty()) return blocked; // not a subnet, leave it to AE2
-
-            if (!ConfigCommon.isSmartBlocking()) {
-                if (blocked) return true;
-                for (var machine : machines) {
-                    if (machineHoldsInput(machine, allInputs)) return true;
-                }
-                return false;
-            }
-
-            // Smart blocking: the same pattern may be pushed again, anything else has to wait.
-            var foreign = new HashSet<>(allInputs);
-            foreign.removeAll(getPatternInputs(pattern));
-
-            // Another pattern's inputs may still be in the interface's buffer, on their way to the machine.
-            if (!foreign.isEmpty() && adapter.containsPatternInput(foreign)) return true;
-
-            var circuit = getCircuitNumber(pattern);
-            var maxBatches = ConfigCommon.getSmartBlockingMaxBatches();
-            for (var machine : machines) {
-                if (!foreign.isEmpty() && machineHoldsInput(machine, foreign)) return true;
-
-                if (circuit.isPresent() && machine instanceof IHasCircuitSlot hasCircuit) {
-                    var circuitStack = hasCircuit.getCircuitInventory()
-                        .getStackInSlot(0);
-                    var machineCircuit = circuitStack.isEmpty() ? 0
-                        : IntCircuitBehaviour.getCircuitConfiguration(circuitStack);
-                    if (machineCircuit != circuit.get() && machineHoldsInput(machine, allInputs)) return true;
-                }
-
-                if (getHeldBatches(machine, pattern) >= maxBatches) return true;
-            }
-            return false;
+            result = decideBlocking(blocked, be, direction, pattern, allInputs, adapter, reason);
         } catch (Exception e) {
             LOGGER.error("Failed to check the subnet for blocking", e);
-            return blocked;
         }
+
+        if (ConfigCommon.isBlockingDebug()) {
+            debug(
+                be,
+                pattern,
+                "ae2Blocked=" + blocked
+                    + " smart="
+                    + ConfigCommon.isSmartBlocking()
+                    + " -> blocked="
+                    + result
+                    + " ("
+                    + reason
+                    + ")");
+        }
+        return result;
+    }
+
+    /**
+     * Logs why blocking did not run for a provider. Only does something when {@code blocking_debug} is enabled.
+     */
+    public static void debugSkipped(BlockEntity be, IPatternDetails pattern, String why) {
+        if (ConfigCommon.isBlockingDebug()) debug(be, pattern, "skipped: " + why);
+    }
+
+    private static final Map<String, Tuple<String, Long>> DEBUG_LAST = new ConcurrentHashMap<>();
+
+    private static void debug(BlockEntity be, IPatternDetails pattern, String text) {
+        var key = be.getBlockPos()
+            .asLong() + ":"
+            + pattern.getDefinition()
+                .hashCode();
+        var now = System.currentTimeMillis();
+        var last = DEBUG_LAST.get(key);
+        // The crafting CPU retries every tick, only log when something changed or now and then.
+        if (last != null && last.getA()
+            .equals(text) && now - last.getB() < 5000L) return;
+        DEBUG_LAST.put(key, new Tuple<>(text, now));
+
+        var output = pattern.getPrimaryOutput();
+        LOGGER.info(
+            "[PCC-BLOCK] provider={} pattern={} circuit={} {}",
+            be.getBlockPos(),
+            output == null ? "?" : output.what(),
+            getCircuitNumber(pattern).map(String::valueOf)
+                .orElse("-"),
+            text);
+    }
+
+    private static boolean decideBlocking(boolean blocked, BlockEntity be, Direction direction,
+        IPatternDetails pattern, Set<AEKey> allInputs, PatternProviderTarget adapter, StringBuilder reason) {
+        var machines = getSubnetMachines(be, direction);
+        reason.append("machines=[");
+        for (var machine : machines) {
+            reason.append(
+                machine.getClass()
+                    .getSimpleName())
+                .append('@')
+                .append(machine.getPos()
+                    .toShortString())
+                .append(' ');
+        }
+        reason.append("] ");
+        if (machines.isEmpty()) {
+            reason.append("not a subnet, left to AE2");
+            return blocked; // not a subnet, leave it to AE2
+        }
+
+        if (!ConfigCommon.isSmartBlocking()) {
+            if (blocked) {
+                reason.append("interface buffer holds a pattern input");
+                return true;
+            }
+            for (var machine : machines) {
+                var held = findHeldInput(machine, allInputs);
+                if (held != null) {
+                    reason.append(machine.getPos()
+                        .toShortString())
+                        .append(" holds ")
+                        .append(held);
+                    return true;
+                }
+            }
+            reason.append("machines hold no pattern input");
+            return false;
+        }
+
+        // Smart blocking: the same pattern may be pushed again, anything else has to wait.
+        var foreign = new HashSet<>(allInputs);
+        foreign.removeAll(getPatternInputs(pattern));
+        reason.append("foreignInputs=")
+            .append(foreign.size())
+            .append(' ');
+
+        // Another pattern's inputs may still be in the interface's buffer, on their way to the machine.
+        if (!foreign.isEmpty() && adapter.containsPatternInput(foreign)) {
+            reason.append("interface buffer holds another pattern's input");
+            return true;
+        }
+
+        var circuit = getCircuitNumber(pattern);
+        var maxBatches = ConfigCommon.getSmartBlockingMaxBatches();
+        for (var machine : machines) {
+            var pos = machine.getPos()
+                .toShortString();
+            var foreignHeld = foreign.isEmpty() ? null : findHeldInput(machine, foreign);
+            if (foreignHeld != null) {
+                reason.append(pos)
+                    .append(" holds another pattern's ")
+                    .append(foreignHeld);
+                return true;
+            }
+
+            if (circuit.isPresent() && machine instanceof IHasCircuitSlot hasCircuit) {
+                var circuitStack = hasCircuit.getCircuitInventory()
+                    .getStackInSlot(0);
+                var machineCircuit = circuitStack.isEmpty() ? 0
+                    : IntCircuitBehaviour.getCircuitConfiguration(circuitStack);
+                if (machineCircuit != circuit.get() && findHeldInput(machine, allInputs) != null) {
+                    reason.append(pos)
+                        .append(" has circuit ")
+                        .append(machineCircuit)
+                        .append(" and still holds inputs");
+                    return true;
+                }
+            }
+
+            var batches = getHeldBatches(machine, pattern);
+            if (batches >= maxBatches) {
+                reason.append(pos)
+                    .append(" already holds ")
+                    .append(batches)
+                    .append(" batches");
+                return true;
+            }
+        }
+        reason.append("no conflict");
+        return false;
     }
 
     /**
@@ -168,6 +275,13 @@ public class PatternProviderLogicImpl {
     }
 
     private static boolean machineHoldsInput(MetaMachine machine, Set<AEKey> inputs) {
+        return findHeldInput(machine, inputs) != null;
+    }
+
+    /**
+     * @return one of the inputs which the machine holds in its input item or fluid handlers, or {@code null}
+     */
+    private static AEKey findHeldInput(MetaMachine machine, Set<AEKey> inputs) {
         var circuitInventory = machine instanceof IHasCircuitSlot hasCircuit ? hasCircuit.getCircuitInventory() : null;
 
         for (var trait : machine.getTraits()) {
@@ -179,7 +293,10 @@ public class PatternProviderLogicImpl {
 
                 for (var slot = 0; slot < items.getSlots(); slot++) {
                     var stack = items.getStackInSlot(slot);
-                    if (!stack.isEmpty() && inputs.contains(AEItemKey.of(stack))) return true;
+                    if (stack.isEmpty()) continue;
+
+                    var key = AEItemKey.of(stack);
+                    if (inputs.contains(key)) return key;
                 }
             } else if (trait instanceof NotifiableFluidTank tank) {
                 if (
@@ -189,11 +306,14 @@ public class PatternProviderLogicImpl {
 
                 for (var index = 0; index < tank.getTanks(); index++) {
                     var fluid = tank.getFluidInTank(index);
-                    if (!fluid.isEmpty() && inputs.contains(AEFluidKey.of(fluid))) return true;
+                    if (fluid.isEmpty()) continue;
+
+                    var key = AEFluidKey.of(fluid);
+                    if (inputs.contains(key)) return key;
                 }
             }
         }
-        return false;
+        return null;
     }
 
     /**

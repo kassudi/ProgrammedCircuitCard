@@ -78,7 +78,12 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
     private boolean blockWhileSubnetIsBusy(boolean blocked,
         @Local(ordinal = 0, argsOnly = true) IPatternDetails patternDetails, @Local(ordinal = 0) Direction direction,
         @Local PatternProviderTarget adapter) {
-        if (!ConfigCommon.isSubnetBlocking() || !isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get())) {
+        if (!ConfigCommon.isSubnetBlocking()) {
+            PatternProviderLogicImpl.debugSkipped(this.host.getBlockEntity(), patternDetails, "subnet_blocking is off");
+            return blocked;
+        }
+        if (!isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get())) {
+            PatternProviderLogicImpl.debugSkipped(this.host.getBlockEntity(), patternDetails, "no card installed");
             return blocked;
         }
 
