@@ -17,6 +17,7 @@ import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.sugar.Local;
 
 import appeng.api.crafting.IPatternDetails;
+import appeng.api.parts.IPartHost;
 import appeng.api.stacks.AEKey;
 import appeng.api.upgrades.IUpgradeableObject;
 import appeng.helpers.patternprovider.PatternProviderLogic;
@@ -41,6 +42,19 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
 
     @Shadow
     public abstract void updatePatterns();
+
+    @Shadow
+    public abstract boolean isBlocking();
+
+    @Shadow
+    private Set<Direction> getActiveSides() {
+        return null;
+    }
+
+    @Shadow
+    private PatternProviderTarget findAdapter(Direction side) {
+        return null;
+    }
 
     @ModifyArg(
         method = "updatePatterns",
@@ -76,8 +90,7 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
             target = "Lappeng/helpers/patternprovider/PatternProviderTarget;containsPatternInput(Ljava/util/Set;)Z"),
         require = 0)
     private boolean blockWhileSubnetIsBusy(boolean blocked,
-        @Local(ordinal = 0, argsOnly = true) IPatternDetails patternDetails, @Local(ordinal = 0) Direction direction,
-        @Local PatternProviderTarget adapter) {
+        @Local(ordinal = 0, argsOnly = true) IPatternDetails patternDetails, @Local(ordinal = 0) Direction direction) {
         if (!ConfigCommon.isSubnetBlocking()) {
             PatternProviderLogicImpl.debugSkipped(this.host.getBlockEntity(), patternDetails, "subnet_blocking is off");
             return blocked;
@@ -93,7 +106,67 @@ public abstract class MixinPatternProviderLogic implements IUpgradeableObject {
             direction,
             patternDetails,
             this.patternInputs,
-            adapter);
+            this.findAdapter(direction));
+    }
+
+    /**
+     * Debug probe: is pushPattern reached for this provider, and what is next to it?
+     */
+    @Inject(method = "pushPattern", at = @At("HEAD"), require = 0)
+    private void pCCard$probeStart(CallbackInfoReturnable<Boolean> cir) {
+        if (!ConfigCommon.isBlockingDebug()) return;
+
+        var be = this.host.getBlockEntity();
+        var level = be.getLevel();
+        var text = new StringBuilder("pushPattern reached: isBlocking=").append(this.isBlocking())
+            .append(" card=")
+            .append(isUpgradedWith(PCCard.PROGRAMMED_CIRCUIT_CARD_ITEM.get()))
+            .append(" subnet_blocking=")
+            .append(ConfigCommon.isSubnetBlocking())
+            .append(" sides=[");
+        for (var side : this.getActiveSides()) {
+            var adjacent = level == null ? null
+                : level.getBlockEntity(
+                    be.getBlockPos()
+                        .relative(side));
+            text.append(side)
+                .append(':')
+                .append(
+                    adjacent == null ? "none"
+                        : adjacent.getClass()
+                            .getSimpleName());
+            if (adjacent instanceof IPartHost partHost) {
+                var part = partHost.getPart(side.getOpposite());
+                text.append('/')
+                    .append(
+                        part == null ? "no part"
+                            : part.getClass()
+                                .getSimpleName());
+            }
+            text.append(' ');
+        }
+        text.append(']');
+        PatternProviderLogicImpl.debugRaw(
+            "start:" + be.getBlockPos()
+                .asLong(),
+            text.toString());
+    }
+
+    /**
+     * Debug probe: plain injection at AE2's blocking check, without captured locals.
+     */
+    @Inject(
+        method = "pushPattern",
+        at = @At(
+            value = "INVOKE",
+            target = "Lappeng/helpers/patternprovider/PatternProviderTarget;containsPatternInput(Ljava/util/Set;)Z"),
+        require = 0)
+    private void pCCard$probeBlockingCheck(CallbackInfoReturnable<Boolean> cir) {
+        PatternProviderLogicImpl.debugRaw(
+            "check:" + this.host.getBlockEntity()
+                .getBlockPos()
+                .asLong(),
+            "AE2's blocking check was reached");
     }
 
     @Inject(

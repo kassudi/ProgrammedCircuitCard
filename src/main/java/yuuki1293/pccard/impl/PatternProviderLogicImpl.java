@@ -129,6 +129,22 @@ public class PatternProviderLogicImpl {
 
     private static final Map<String, Tuple<String, Long>> DEBUG_LAST = new ConcurrentHashMap<>();
 
+    /**
+     * Logs a message from the blocking hooks. Only does something when {@code blocking_debug} is enabled.
+     */
+    public static void debugRaw(String key, String text) {
+        if (!ConfigCommon.isBlockingDebug()) return;
+
+        var now = System.currentTimeMillis();
+        var last = DEBUG_LAST.get(key);
+        if (
+            last != null && last.getA()
+                .equals(text) && now - last.getB() < 5000L
+        ) return;
+        DEBUG_LAST.put(key, new Tuple<>(text, now));
+        LOGGER.info("[PCC-BLOCK] {}", text);
+    }
+
     private static void debug(BlockEntity be, IPatternDetails pattern, String text) {
         var key = be.getBlockPos()
             .asLong() + ":"
